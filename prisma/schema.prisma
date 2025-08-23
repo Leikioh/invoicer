@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Client {
+  id            String   @id @default(uuid())
+  displayName   String
+  email         String?  @unique
+  phone         String?
+  billingStreet String?
+  billingZip    String?
+  billingCity   String?
+  vatNumber     String?
+  siret         String?
+  createdAt     DateTime @default(now())
+
+  invoices Invoice[]
+  quotes   Quote[] // ⬅️ nouveau: les devis du client
+}
+
+model Invoice {
+  id         String        @id @default(uuid())
+  customerId String
+  customer   Client        @relation(fields: [customerId], references: [id])
+  number     String?       @unique
+  status     InvoiceStatus @default(DRAFT)
+
+  issueDate DateTime?
+  dueDate   DateTime?
+  currency  String    @default("EUR")
+  notes     String?   @db.Text
+
+  // Totaux
+  subTotal   Decimal? @db.Decimal(12, 2)
+  taxTotal   Decimal? @db.Decimal(12, 2)
+  grandTotal Decimal? @db.Decimal(12, 2)
+  paidAmount Decimal  @default(0) @db.Decimal(12, 2)
+
+  // Traces du workflow
+  sentAt       DateTime?
+  validatedAt  DateTime?
+  refusedAt    DateTime?
+  statusReason String? @db.Text
+
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  lines     InvoiceLine[]
+
+  // ⬇️ AJOUT : relation inverse vers Quote (1–1)
+  quote Quote? @relation(name: "QuoteToInvoice")
+
+  @@index([status])
+  @@index([customerId])
+}
+
+model InvoiceLine {
+  id           String  @id @default(uuid())
+  invoiceId    String
+  invoice      Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  designation  String
+  quantity     Decimal @db.Decimal(12, 2)
+  unitPrice    Decimal @db.Decimal(12, 2)
+  vatRate      Decimal @db.Decimal(5, 2)
+  lineTotalHt  Decimal @db.Decimal(12, 2)
+  lineTax      Decimal @db.Decimal(12, 2)
+  lineTotalTtc Decimal @db.Decimal(12, 2)
+
+  @@index([invoiceId])
+}
+
+model InvoiceSequence {
+  year       Int @id
+  lastNumber Int @default(0)
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  VALIDATED
+  REFUSED
+  CANCELLED
+}
+
+////////////////////////
+// 💡 Devis (Quotes)  //
+////////////////////////
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REFUSED
+  CANCELLED
+}
+
+model Quote {
+  id         String @id @default(uuid())
+  customerId String
+  customer   Client @relation(fields: [customerId], references: [id])
+
+  number String?     @unique
+  status QuoteStatus @default(DRAFT)
+
+  issueDate  DateTime?
+  expiryDate DateTime?
+  currency   String    @default("EUR")
+  notes      String?  @db.Text
+
+  subTotal   Decimal? @db.Decimal(12, 2)
+  taxTotal   Decimal? @db.Decimal(12, 2)
+  grandTotal Decimal? @db.Decimal(12, 2)
+
+  // ⬇️ RELATION 1–1 nommée
+  invoiceId String?  @unique
+  invoice   Invoice? @relation(name: "QuoteToInvoice", fields: [invoiceId], references: [id])
+
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  lines     QuoteLine[]
+
+  @@index([status])
+  @@index([customerId])
+}
+
+model QuoteLine {
+  id      String @id @default(uuid())
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  designation  String
+  quantity     Decimal @db.Decimal(12, 2)
+  unitPrice    Decimal @db.Decimal(12, 2)
+  vatRate      Decimal @db.Decimal(5, 2)
+  lineTotalHt  Decimal @db.Decimal(12, 2)
+  lineTax      Decimal @db.Decimal(12, 2)
+  lineTotalTtc Decimal @db.Decimal(12, 2)
+
+  @@index([quoteId])
+}
+
+model QuoteSequence {
+  year       Int @id
+  lastNumber Int @default(0)
+}
