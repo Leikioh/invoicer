@@ -1,17 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { finalizeInvoice } from "@/lib/invoice";
 
 export const runtime = "nodejs";
 
-type RouteParams = { params: { id: string } };
+type RouteCtx = { params: Promise<{ id: string }> };
 
-export async function POST(_req: Request, { params }: RouteParams) {
+export async function POST(_req: NextRequest, { params }: RouteCtx) {
   try {
-    const id = params?.id?.trim();
+    const { id } = await params;
     if (!id) {
       return NextResponse.json({ error: "Missing invoice id" }, { status: 400 });
     }
-
     const invoice = await finalizeInvoice(id);
     return NextResponse.json(invoice, { status: 200 });
   } catch (e: unknown) {

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import {
   initDoc,
@@ -56,12 +56,12 @@ type Row = {
 type ColAlign = "left" | "right";
 type ColDef = { key: keyof Row; title: string; width: number; align?: ColAlign };
 
-type RouteCtx = { params: { id: string } };
+type RouteCtx = { params: Promise<{ id: string }> };
 
 /* ---------------- Route ---------------- */
 
-export async function GET(_req: Request, { params }: RouteCtx) {
-  const id = params?.id;
+export async function GET(_req: NextRequest, { params }: RouteCtx) {
+  const { id } = await params;
   if (!id) {
     return NextResponse.json({ error: "ID manquant" }, { status: 400 });
   }
