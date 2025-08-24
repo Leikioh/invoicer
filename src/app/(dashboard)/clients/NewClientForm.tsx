@@ -3,6 +3,17 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+type CreateClientPayload = {
+  displayName: string;
+  email?: string | null;
+  phone?: string | null;
+  vatNumber?: string | null;
+  siret?: string | null;
+  billingStreet?: string | null;
+  billingZip?: string | null;
+  billingCity?: string | null;
+};
+
 export default function NewClientForm() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -12,10 +23,10 @@ export default function NewClientForm() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [vatNumber, setVatNumber] = useState("");
-  const [address, setAddress] = useState("");
+  const [address, setAddress] = useState(""); // mappé vers billingStreet
   const [siret, setSiret] = useState("");
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
     // petite validation côté client
@@ -24,17 +35,32 @@ export default function NewClientForm() {
       return;
     }
 
+    const payload: CreateClientPayload = {
+      displayName: displayName.trim(),
+      email: email.trim() || null,
+      phone: phone.trim() || null,
+      vatNumber: vatNumber.trim() || null,
+      siret: siret.trim() || null,
+      billingStreet: address.trim() || null, // ⬅️ important: correspond au schéma/API
+      // billingZip: null,
+      // billingCity: null,
+    };
+
     setLoading(true);
     const res = await fetch("/api/clients", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ displayName, email, phone, vatNumber, address, siret }),
+      body: JSON.stringify(payload),
     });
     setLoading(false);
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      alert(err.error ?? "Erreur lors de la création du client");
+      const err: unknown = await res.json().catch(() => ({}));
+      const msg =
+        typeof err === "object" && err && "error" in err && typeof (err as { error?: unknown }).error === "string"
+          ? (err as { error: string }).error
+          : "Erreur lors de la création du client";
+      alert(msg);
       return;
     }
 
@@ -69,7 +95,7 @@ export default function NewClientForm() {
         className="border text-black rounded px-3 py-2"
         placeholder="Nom affiché *"
         value={displayName}
-        onChange={(e) => setDisplayName(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDisplayName(e.target.value)}
         required
       />
       <input
@@ -77,33 +103,33 @@ export default function NewClientForm() {
         placeholder="Email"
         type="email"
         value={email}
-        onChange={(e) => setEmail(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
       />
       <input
         className="border text-black rounded px-3 py-2"
         placeholder="Téléphone"
         value={phone}
-        onChange={(e) => setPhone(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPhone(e.target.value)}
       />
       <input
         className="border text-black rounded px-3 py-2"
         placeholder="N° TVA"
         value={vatNumber}
-        onChange={(e) => setVatNumber(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setVatNumber(e.target.value)}
       />
 
-      {/* Nouveaux champs */}
+      {/* Adresse libre -> billingStreet côté API */}
       <input
         className="border text-black rounded px-3 py-2 sm:col-span-2"
         placeholder="Adresse postale"
         value={address}
-        onChange={(e) => setAddress(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAddress(e.target.value)}
       />
       <input
         className="border text-black rounded px-3 py-2 sm:col-span-2"
         placeholder="Numéro de SIRET (14 chiffres)"
         value={siret}
-        onChange={(e) => setSiret(e.target.value.replace(/\D/g, ""))} // garde que les chiffres
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSiret(e.target.value.replace(/\D/g, ""))}
         maxLength={14}
       />
 
