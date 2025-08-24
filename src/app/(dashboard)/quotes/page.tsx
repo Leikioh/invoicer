@@ -4,37 +4,71 @@ import { QuoteStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { finalizeQuote, updateQuoteStatus, convertQuoteToInvoice } from "@/lib/quote";
 
-function fmt(v: unknown) {
+// Prisma ne tourne pas en runtime Edge
+export const runtime = "nodejs";
+
+/** Type guard pour valeurs ayant .toNumber() (Prisma.Decimal) */
+function hasToNumber(v: unknown): v is { toNumber: () => number } {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "toNumber" in v &&
+    typeof (v as { toNumber?: unknown }).toNumber === "function"
+  );
+}
+
+/** Formatte montants: supporte number | Prisma.Decimal | string | null/undefined */
+function formatAmount(v: unknown): string {
   if (v == null) return "—";
-  // @ts-ignore Prisma.Decimal
-  const n = typeof v === "object" && v?.toNumber ? (v as any).toNumber() : Number(v);
-  if (Number.isNaN(n)) return "—";
+  let n: number | null = null;
+
+  if (typeof v === "number") n = v;
+  else if (hasToNumber(v)) n = v.toNumber();
+  else {
+    const parsed = Number(v);
+    n = Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if (n === null) return "—";
   return `${n.toFixed(2)} €`;
 }
 
+/* ---------------- Server Actions ---------------- */
+
 async function finalizeAction(formData: FormData) {
   "use server";
-  const id = String(formData.get("id"));
+  const idRaw = formData.get("id");
+  const id = typeof idRaw === "string" ? idRaw : "";
+  if (!id) return;
   await finalizeQuote(id);
   revalidatePath("/quotes");
 }
 
 async function statusAction(formData: FormData) {
   "use server";
-  const id = String(formData.get("id"));
-  const raw = String(formData.get("status"));
-  const to = QuoteStatus[raw as keyof typeof QuoteStatus];
+  const idRaw = formData.get("id");
+  const statusRaw = formData.get("status");
+
+  const id = typeof idRaw === "string" ? idRaw : "";
+  const statusKey = typeof statusRaw === "string" ? statusRaw : "";
+  const to = QuoteStatus[statusKey as keyof typeof QuoteStatus];
+
+  if (!id || !to) return;
   await updateQuoteStatus(id, to);
   revalidatePath("/quotes");
 }
 
 async function convertAction(formData: FormData) {
   "use server";
-  const id = String(formData.get("id"));
+  const idRaw = formData.get("id");
+  const id = typeof idRaw === "string" ? idRaw : "";
+  if (!id) return;
   await convertQuoteToInvoice(id);
   revalidatePath("/quotes");
   revalidatePath("/invoices");
 }
+
+/* ---------------- Page ---------------- */
 
 export default async function QuotesPage() {
   const quotes = await prisma.quote.findMany({
@@ -42,15 +76,19 @@ export default async function QuotesPage() {
     include: { customer: true },
   });
 
-  const Badge = ({ s }: { s: string }) => {
-    const map: Record<string, string> = {
+  const Badge: React.FC<{ s: QuoteStatus }> = ({ s }) => {
+    const map: Record<QuoteStatus, string> = {
       DRAFT: "bg-gray-200 text-gray-800",
       SENT: "bg-blue-100 text-blue-700",
       ACCEPTED: "bg-green-100 text-green-700",
       REFUSED: "bg-red-100 text-red-700",
       CANCELLED: "bg-yellow-100 text-yellow-800",
     };
-    return <span className={`px-2 py-1 text-xs rounded-full ${map[s] ?? "bg-gray-200 text-gray-800"}`}>{s}</span>;
+    return (
+      <span className={`px-2 py-1 text-xs rounded-full ${map[s]}`}>
+        {s}
+      </span>
+    );
   };
 
   return (
@@ -86,12 +124,18 @@ export default async function QuotesPage() {
             )}
             {quotes.map((q) => (
               <tr key={q.id} className="border-t">
-                <td className="py-2 px-4 font-medium text-black">{q.number ?? "(brouillon)"}</td>
-                <td className="px-4 text-black">{q.customer?.displayName ?? "—"}</td>
+                <td className="py-2 px-4 font-medium text-black">
+                  {q.number ?? "(brouillon)"}
+                </td>
+                <td className="px-4 text-black">
+                  {q.customer?.displayName ?? "—"}
+                </td>
                 <td className="px-4">
                   <Badge s={q.status} />
                 </td>
-                <td className="px-4 font-semibold text-black">{fmt(q.grandTotal)}</td>
+                <td className="px-4 font-semibold text-black">
+                  {formatAmount(q.grandTotal as unknown)}
+                </td>
                 <td className="px-4">
                   <div className="flex flex-wrap gap-2">
                     {/* PDF */}
@@ -103,6 +147,7 @@ export default async function QuotesPage() {
                       PDF
                     </Link>
 
+                    {/* Finaliser */}
                     {!q.number && (
                       <form action={finalizeAction}>
                         <input type="hidden" name="id" value={q.id} />
@@ -112,6 +157,7 @@ export default async function QuotesPage() {
                       </form>
                     )}
 
+                    {/* Transitions de statut */}
                     {q.status === "DRAFT" && (
                       <form action={statusAction}>
                         <input type="hidden" name="id" value={q.id} />

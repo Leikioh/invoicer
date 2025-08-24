@@ -60,7 +60,7 @@ export function drawTitle(page: PDFPage, bold: PDFFont, title: string, margin = 
 }
 
 export function drawCompanyBlock(page: PDFPage, font: PDFFont, lines: string[], margin = 40): number {
-  let y = A4.h - 110;
+  const y = A4.h - 110;
   lines.forEach((t, i) => {
     page.drawText(sanitizeText(t), { x: margin, y: y - i * 12, size: 10, font, color: PALETTE.text });
   });
@@ -73,7 +73,14 @@ export function drawClientBlock(page: PDFPage, font: PDFFont, lines: string[], x
   });
 }
 
-export function drawMeta(page: PDFPage, font: PDFFont, bold: PDFFont, rows: Array<[string, string]>, x: number, y: number): number {
+export function drawMeta(
+  page: PDFPage,
+  font: PDFFont,
+  bold: PDFFont,
+  rows: Array<[string, string]>,
+  x: number,
+  y: number
+): number {
   rows.forEach(([k, v], i) => {
     page.drawText(sanitizeText(k + " :"), { x, y: y - i * 14, size: 10, font: bold, color: PALETTE.text });
     page.drawText(sanitizeText(v), { x: x + 120, y: y - i * 14, size: 10, font, color: PALETTE.text });
@@ -95,6 +102,11 @@ export function drawTableHeader(page: PDFPage, bold: PDFFont, cols: Col[], x: nu
   return y - h;
 }
 
+/**
+ * Dessine une cellule de tableau.
+ * NB: on choisit déjà la bonne police (regular/bold) à l’appel,
+ * le paramètre `_bold` est conservé pour compat avec les appels et éviter les warnings lint.
+ */
 export function drawCell(
   page: PDFPage,
   font: PDFFont,
@@ -103,14 +115,14 @@ export function drawCell(
   y: number,
   width: number,
   align: "left" | "right" = "left",
-  bold = false,
+  _bold = false,
   size = 10
 ): void {
-  const f = font;
   const pad = 6;
   const safe = sanitizeText(text);
-  const tx = align === "left" ? x + pad : x + width - pad - f.widthOfTextAtSize(safe, size);
-  page.drawText(safe, { x: tx, y, size, font: f, color: PALETTE.text });
+  const textWidth = font.widthOfTextAtSize(safe, size);
+  const tx = align === "left" ? x + pad : x + width - pad - textWidth;
+  page.drawText(safe, { x: tx, y, size, font, color: PALETTE.text });
 }
 
 export function ensureSpace(pdf: PDFDocument, pageRef: { page: PDFPage }, yRef: { y: number }, minY = 120): void {

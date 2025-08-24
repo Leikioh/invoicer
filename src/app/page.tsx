@@ -1,19 +1,39 @@
 // src/app/page.tsx
 import Link from "next/link";
-import { prisma } from "../lib/db";
+import { prisma } from "@/lib/db";
 import { InvoiceStatus } from "@prisma/client";
 
-// helper: formate Prisma.Decimal / number / string
-function formatAmount(v: unknown) {
+// Prisma ne fonctionne pas en runtime Edge
+export const runtime = "nodejs";
+
+/** Type guard: valeur avec une méthode toNumber() (ex: Prisma.Decimal) */
+function hasToNumber(v: unknown): v is { toNumber: () => number } {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "toNumber" in v &&
+    typeof (v as { toNumber?: unknown }).toNumber === "function"
+  );
+}
+
+/** Formatte un montant (number | Prisma.Decimal | string | null/undefined) */
+function formatAmount(v: unknown): string {
   if (v == null) return "—";
-  // @ts-ignore Prisma.Decimal possède .toNumber()
-  const n = typeof v === "object" && v?.toNumber ? (v as any).toNumber() : Number(v);
-  if (Number.isNaN(n)) return "—";
+  let n: number | null = null;
+
+  if (typeof v === "number") n = v;
+  else if (hasToNumber(v)) n = v.toNumber();
+  else {
+    const parsed = Number(v);
+    n = Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if (n === null) return "—";
   return `${n.toFixed(2)} €`;
 }
 
-const Badge = ({ s }: { s: string }) => {
-  const map: Record<string, string> = {
+const Badge: React.FC<{ s: InvoiceStatus }> = ({ s }) => {
+  const map: Record<InvoiceStatus, string> = {
     DRAFT: "bg-gray-200 text-gray-800",
     SENT: "bg-blue-100 text-blue-700",
     VALIDATED: "bg-green-100 text-green-700",
@@ -21,7 +41,7 @@ const Badge = ({ s }: { s: string }) => {
     CANCELLED: "bg-yellow-100 text-yellow-800",
   };
   return (
-    <span className={`px-2 py-1 text-xs rounded-full ${map[s] ?? "bg-gray-200 text-gray-800"}`}>
+    <span className={`px-2 py-1 text-xs rounded-full ${map[s]}`}>
       {s}
     </span>
   );
@@ -35,8 +55,7 @@ export default async function Home() {
 
   const last = invoices.slice(0, 5);
   const totalCount = invoices.length;
-  // "À encaisser" = factures envoyées (SENT)
-  const toCollect = invoices.filter(i => i.status === InvoiceStatus.SENT).length;
+  const toCollect = invoices.filter((i) => i.status === InvoiceStatus.SENT).length;
 
   return (
     <div className="space-y-8">
@@ -51,7 +70,7 @@ export default async function Home() {
         </Link>
       </section>
 
-      {/* KPI cards (même style que le reste) */}
+      {/* KPI cards */}
       <section className="grid sm:grid-cols-3 gap-4">
         <div className="rounded-lg border bg-white p-4 shadow-sm">
           <div className="text-sm text-gray-500">Factures</div>
@@ -67,7 +86,7 @@ export default async function Home() {
         </Link>
       </section>
 
-      {/* Dernières factures (table comme /invoices) */}
+      {/* Dernières factures */}
       <section className="rounded-lg border bg-white shadow-sm overflow-hidden">
         <div className="flex items-center justify-between p-4 border-b">
           <h2 className="font-medium text-black">Dernières factures</h2>

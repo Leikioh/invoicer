@@ -5,30 +5,65 @@ import { revalidatePath } from "next/cache";
 import { InvoiceStatus } from "@prisma/client";
 import DeleteInvoiceButton from "./DeleteInvoiceButton";
 
-function formatAmount(v: unknown) {
+// Prisma ne fonctionne pas en runtime Edge
+export const runtime = "nodejs";
+
+/** Type guard: valeur avec une méthode toNumber() (ex: Prisma.Decimal) */
+function hasToNumber(v: unknown): v is { toNumber: () => number } {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "toNumber" in v &&
+    typeof (v as { toNumber?: unknown }).toNumber === "function"
+  );
+}
+
+/** Formatte montants: supporte number | Prisma.Decimal | string | null/undefined */
+function formatAmount(v: unknown): string {
   if (v == null) return "—";
-  // @ts-ignore Prisma.Decimal
-  const n = typeof v === "object" && v?.toNumber ? (v as any).toNumber() : Number(v);
-  if (Number.isNaN(n)) return "—";
+  let n: number | null = null;
+
+  if (typeof v === "number") n = v;
+  else if (hasToNumber(v)) n = v.toNumber();
+  else {
+    const parsed = Number(v);
+    n = Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if (n === null) return "—";
   return `${n.toFixed(2)} €`;
 }
 
+// ----- Server Actions -----
+
 async function setStatusAction(formData: FormData) {
   "use server";
-  const id = String(formData.get("id"));
-  const raw = String(formData.get("status"));
-  const status = InvoiceStatus[raw as keyof typeof InvoiceStatus];
-  const reason = (formData.get("reason") as string) || undefined;
+  const idRaw = formData.get("id");
+  const statusRaw = formData.get("status");
+  const reasonRaw = formData.get("reason");
+
+  const id = typeof idRaw === "string" ? idRaw : "";
+  const statusKey = typeof statusRaw === "string" ? statusRaw : "";
+
+  const status = InvoiceStatus[statusKey as keyof typeof InvoiceStatus];
+  const reason = typeof reasonRaw === "string" && reasonRaw.trim() ? reasonRaw : undefined;
+
+  if (!id || !status) return;
+
   await updateInvoiceStatus(id, status, reason);
   revalidatePath("/invoices");
 }
 
 async function deleteInvoiceAction(formData: FormData) {
   "use server";
-  const id = String(formData.get("id"));
+  const idRaw = formData.get("id");
+  const id = typeof idRaw === "string" ? idRaw : "";
+  if (!id) return;
   await deleteInvoice(id);
   revalidatePath("/invoices");
 }
+
+// ----- Page -----
 
 export default async function InvoicesPage() {
   const invoices = await prisma.invoice.findMany({
@@ -36,8 +71,8 @@ export default async function InvoicesPage() {
     include: { customer: true },
   });
 
-  const Badge = ({ s }: { s: string }) => {
-    const map: Record<string, string> = {
+  const Badge: React.FC<{ s: InvoiceStatus }> = ({ s }) => {
+    const map: Record<InvoiceStatus, string> = {
       DRAFT: "bg-gray-200 text-gray-800",
       SENT: "bg-blue-100 text-blue-700",
       VALIDATED: "bg-green-100 text-green-700",
@@ -45,7 +80,7 @@ export default async function InvoicesPage() {
       CANCELLED: "bg-yellow-100 text-yellow-800",
     };
     return (
-      <span className={`px-2 py-1 text-xs rounded-full ${map[s] ?? "bg-gray-200 text-gray-800"}`}>
+      <span className={`px-2 py-1 text-xs rounded-full ${map[s]}`}>
         {s}
       </span>
     );
@@ -80,7 +115,9 @@ export default async function InvoicesPage() {
                 </td>
                 <td className="px-4 text-black">{inv.customer?.displayName ?? "—"}</td>
                 <td className="px-4"><Badge s={inv.status} /></td>
-                <td className="px-4 font-semibold text-black">{formatAmount(inv.grandTotal)}</td>
+                <td className="px-4 font-semibold text-black">
+                  {formatAmount(inv.grandTotal as unknown)}
+                </td>
                 <td className="px-4">
                   <div className="flex flex-wrap gap-2">
                     {/* Statuts */}
@@ -93,6 +130,7 @@ export default async function InvoicesPage() {
                         </button>
                       </form>
                     )}
+
                     {inv.status === "SENT" && (
                       <>
                         <form action={setStatusAction}>
@@ -102,6 +140,7 @@ export default async function InvoicesPage() {
                             Valider
                           </button>
                         </form>
+
                         <form action={setStatusAction} className="flex items-center gap-2">
                           <input type="hidden" name="id" value={inv.id} />
                           <input type="hidden" name="status" value="REFUSED" />
@@ -111,6 +150,7 @@ export default async function InvoicesPage() {
                         </form>
                       </>
                     )}
+
                     {(inv.status === "REFUSED" || inv.status === "VALIDATED") && (
                       <form action={setStatusAction}>
                         <input type="hidden" name="id" value={inv.id} />
