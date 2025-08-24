@@ -1,11 +1,15 @@
+// ---------- Datasource & Generator (Postgres Supabase) ----------
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")  // pooler (pgbouncer)
+  directUrl = env("DIRECT_URL")    // connexion directe pour migrations/Studio
+}
+
 generator client {
   provider = "prisma-client-js"
 }
 
-datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
-}
+// ---------------------- Modèles ----------------------
 
 model Client {
   id            String   @id @default(uuid())
@@ -20,7 +24,7 @@ model Client {
   createdAt     DateTime @default(now())
 
   invoices Invoice[]
-  quotes   Quote[] // ⬅️ nouveau: les devis du client
+  quotes   Quote[]      // les devis du client
 }
 
 model Invoice {
@@ -51,7 +55,7 @@ model Invoice {
   updatedAt DateTime      @updatedAt
   lines     InvoiceLine[]
 
-  // ⬇️ AJOUT : relation inverse vers Quote (1–1)
+  // relation inverse 1–1 vers Quote
   quote Quote? @relation(name: "QuoteToInvoice")
 
   @@index([status])
@@ -86,9 +90,7 @@ enum InvoiceStatus {
   CANCELLED
 }
 
-////////////////////////
-// 💡 Devis (Quotes)  //
-////////////////////////
+// ---------------------- Devis ----------------------
 
 enum QuoteStatus {
   DRAFT
@@ -108,14 +110,14 @@ model Quote {
 
   issueDate  DateTime?
   expiryDate DateTime?
-  currency   String    @default("EUR")
+  currency   String   @default("EUR")
   notes      String?  @db.Text
 
   subTotal   Decimal? @db.Decimal(12, 2)
   taxTotal   Decimal? @db.Decimal(12, 2)
   grandTotal Decimal? @db.Decimal(12, 2)
 
-  // ⬇️ RELATION 1–1 nommée
+  // relation 1–1 nommée vers Invoice
   invoiceId String?  @unique
   invoice   Invoice? @relation(name: "QuoteToInvoice", fields: [invoiceId], references: [id])
 
