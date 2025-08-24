@@ -1,9 +1,12 @@
-import { NextResponse } from "next/server";
+// src/app/api/quotes/route.ts
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { revalidatePath } from "next/cache";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-/* ------------------ Helpers & types ------------------ */
+/* ------------------ Types & helpers ------------------ */
 
 type LineInput = {
   designation: string;
@@ -15,9 +18,9 @@ type LineInput = {
 type Body = {
   customerId: string;
   lines: LineInput[];
-  dueDate?: string | Date | null;
   notes?: string | null;
-  currency?: string | null; // ex: "EUR"
+  currency?: string | null;
+  expiryDate?: string | Date | null;
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -38,112 +41,133 @@ function toNumberStrict(v: unknown, fieldName: string): number {
   return n;
 }
 
-function parseDueDate(d: unknown): Date | null {
-  if (!d) return null;
-  const dt = d instanceof Date ? d : new Date(String(d));
-  return Number.isFinite(dt.getTime()) ? dt : null;
-}
-
 function normalizeCurrency(c: unknown): string {
   const cur = typeof c === "string" ? c.trim().toUpperCase() : "EUR";
   return cur || "EUR";
 }
 
+function parseDateMaybe(d: unknown): Date | null {
+  if (!d) return null;
+  const dt = d instanceof Date ? d : new Date(String(d));
+  return Number.isFinite(dt.getTime()) ? dt : null;
+}
+
 /* ------------------ Handlers ------------------ */
 
 export async function GET() {
-  const invoices = await prisma.invoice.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { customer: true },
-  });
-  return NextResponse.json(invoices, { status: 200 });
+  try {
+    const quotes = await prisma.quote.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { customer: true },
+    });
+    return NextResponse.json(quotes, { status: 200 });
+  } catch {
+    return NextResponse.json({ error: "Erreur lors du listing des devis" }, { status: 500 });
+  }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const raw: unknown = await req.json();
     if (!isRecord(raw)) {
       return NextResponse.json({ error: "Corps de requête invalide" }, { status: 400 });
     }
 
-    const { customerId, lines, dueDate, notes, currency } = raw as Body;
+    const { customerId, lines: rawLines, notes, currency, expiryDate } = raw as Body;
 
     if (!customerId || typeof customerId !== "string") {
-      return NextResponse.json({ error: "customerId manquant ou invalide" }, { status: 400 });
-    }
-    if (!Array.isArray(lines) || lines.length === 0) {
-      return NextResponse.json({ error: "lines doit être un tableau non vide" }, { status: 400 });
+      return NextResponse.json({ error: "customerId requis" }, { status: 400 });
     }
 
-    const due = parseDueDate(dueDate);
+    if (!Array.isArray(rawLines) || rawLines.length === 0) {
+      return NextResponse.json({ error: "Au moins une ligne requise" }, { status: 400 });
+    }
+
+    const cleanNotes = typeof notes === "string" ? notes.trim().slice(0, 10_000) : null;
     const cur = normalizeCurrency(currency);
+    const exp = parseDateMaybe(expiryDate);
 
-    const invoice = await prisma.$transaction(async (tx) => {
-      // 1) Crée la facture vide (totaux à 0 au départ)
-      const created = await tx.invoice.create({
-        data: { customerId, dueDate: due, notes: notes ?? null, currency: cur },
-      });
+    // Valide + calcule chaque ligne
+    const lines = rawLines
+      .map((l): {
+        designation: string;
+        quantity: number;
+        unitPrice: number;
+        vatRate: number;
+        lineTotalHt: number;
+        lineTax: number;
+        lineTotalTtc: number;
+      } | null => {
+        if (!isRecord(l) || typeof l.designation !== "string") return null;
+        const designation = l.designation.trim().slice(0, 500);
+        if (!designation) return null;
 
-      // 2) Insère les lignes + accumule les totaux
-      let subTotal = 0;
-      let taxTotal = 0;
-      let grandTotal = 0;
+        const quantity = toNumberStrict(l.quantity, "quantity");
+        const unitPrice = toNumberStrict(l.unitPrice, "unitPrice");
+        const vatRate = toNumberStrict(l.vatRate, "vatRate");
 
-      for (const l of lines) {
-        if (!isRecord(l) || typeof l.designation !== "string" || !l.designation.trim()) {
-          throw new Error("Chaque ligne doit contenir un 'designation' non vide");
-        }
+        if (!(quantity > 0)) return null;
+        if (!(unitPrice >= 0)) return null;
+        if (!(vatRate >= 0 && vatRate <= 100)) return null;
 
-        const qty = toNumberStrict(l.quantity, "quantity");
-        const unit = toNumberStrict(l.unitPrice, "unitPrice");
-        const rate = toNumberStrict(l.vatRate, "vatRate"); // %
-
-        const ht = +(qty * unit).toFixed(2);
-        const tax = +((ht * rate) / 100).toFixed(2);
+        const ht = +(quantity * unitPrice).toFixed(2);
+        const tax = +((ht * vatRate) / 100).toFixed(2);
         const ttc = +(ht + tax).toFixed(2);
 
-        await tx.invoiceLine.create({
-          data: {
-            invoiceId: created.id,
-            designation: l.designation.trim(),
-            quantity: qty,
-            unitPrice: unit,
-            vatRate: rate,
-            lineTotalHt: ht,
-            lineTax: tax,
-            lineTotalTtc: ttc,
-          },
-        });
+        return { designation, quantity, unitPrice, vatRate, lineTotalHt: ht, lineTax: tax, lineTotalTtc: ttc };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
 
-        subTotal += ht;
-        taxTotal += tax;
-        grandTotal += ttc;
-      }
+    if (lines.length === 0) {
+      return NextResponse.json({ error: "Lignes invalides" }, { status: 400 });
+    }
 
-      // 3) Met à jour les totaux sur la facture
-      await tx.invoice.update({
-        where: { id: created.id },
+    const created = await prisma.$transaction(async (tx) => {
+      // 1) Créer le devis (DRAFT, sans numéro)
+      const quote = await tx.quote.create({
         data: {
-          subTotal: +subTotal.toFixed(2),
-          taxTotal: +taxTotal.toFixed(2),
-          grandTotal: +grandTotal.toFixed(2),
+          customerId,
+          notes: cleanNotes,
+          currency: cur,
+          expiryDate: exp,
         },
       });
 
-      // 4) Retourne la facture complète
-      const full = await tx.invoice.findUnique({
-        where: { id: created.id },
-        include: { customer: true, lines: true },
+      // 2) Insérer les lignes
+      await tx.quoteLine.createMany({
+        data: lines.map((l) => ({ quoteId: quote.id, ...l })),
       });
 
-      // Par sécurité (ne devrait pas arriver)
-      if (!full) throw new Error("Création facture échouée");
-      return full;
+      // 3) Calculer les totaux et les stocker sur le devis
+      const totals = lines.reduce(
+        (acc, l) => {
+          acc.sub += l.lineTotalHt;
+          acc.tax += l.lineTax;
+          acc.ttc += l.lineTotalTtc;
+          return acc;
+        },
+        { sub: 0, tax: 0, ttc: 0 }
+      );
+
+      const updated = await tx.quote.update({
+        where: { id: quote.id },
+        data: {
+          subTotal: +totals.sub.toFixed(2),
+          taxTotal: +totals.tax.toFixed(2),
+          grandTotal: +totals.ttc.toFixed(2),
+        },
+        include: { customer: true },
+      });
+
+      return updated;
     });
 
-    return NextResponse.json(invoice, { status: 201 });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "Unexpected error";
-    return NextResponse.json({ error: message }, { status: 400 });
+    // 🔁 Rafraîchir les pages concernées (listes & home)
+    revalidatePath("/quotes");
+    revalidatePath("/");
+
+    return NextResponse.json(created, { status: 201 });
+  } catch {
+    return NextResponse.json({ error: "Erreur interne lors de la création du devis" }, { status: 500 });
   }
 }

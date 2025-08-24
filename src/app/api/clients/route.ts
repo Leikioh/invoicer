@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
+import { revalidatePath } from "next/cache";
 
 export const runtime = "nodejs";
 
@@ -72,6 +73,8 @@ export async function POST(req: NextRequest) {
     };
 
     const created = await prisma.client.create({ data });
+    revalidatePath("/clients");
+    revalidatePath("/"); // si la home affiche des compteurs
     return NextResponse.json(created, { status: 201 });
   } catch (e: unknown) {
     if (isPrismaKnownError(e) && e.code === "P2002") {

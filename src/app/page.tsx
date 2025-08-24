@@ -2,9 +2,11 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { InvoiceStatus } from "@prisma/client";
+import { unstable_noStore as noStore } from "next/cache";
 
 // Prisma ne fonctionne pas en runtime Edge
 export const runtime = "nodejs";
+export const revalidate = 0; // ou: export const dynamic = "force-dynamic";
 
 /** Type guard: valeur avec une méthode toNumber() (ex: Prisma.Decimal) */
 function hasToNumber(v: unknown): v is { toNumber: () => number } {
@@ -47,7 +49,8 @@ const Badge: React.FC<{ s: InvoiceStatus }> = ({ s }) => {
   );
 };
 
-export default async function Home() {
+export default async function Page() {
+  noStore();
   const invoices = await prisma.invoice.findMany({
     orderBy: { createdAt: "desc" },
     include: { customer: true },

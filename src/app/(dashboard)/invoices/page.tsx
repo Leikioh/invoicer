@@ -4,9 +4,11 @@ import { updateInvoiceStatus, deleteInvoice } from "@/lib/invoice";
 import { revalidatePath } from "next/cache";
 import { InvoiceStatus } from "@prisma/client";
 import DeleteInvoiceButton from "./DeleteInvoiceButton";
+import { unstable_noStore as noStore } from "next/cache";
 
-// Prisma ne fonctionne pas en runtime Edge
 export const runtime = "nodejs";
+export const revalidate = 0; // ou: export const dynamic = "force-dynamic";
+
 
 /** Type guard: valeur avec une méthode toNumber() (ex: Prisma.Decimal) */
 function hasToNumber(v: unknown): v is { toNumber: () => number } {
@@ -65,7 +67,8 @@ async function deleteInvoiceAction(formData: FormData) {
 
 // ----- Page -----
 
-export default async function InvoicesPage() {
+export default async function Page() {
+  noStore();
   const invoices = await prisma.invoice.findMany({
     orderBy: { createdAt: "desc" },
     include: { customer: true },

@@ -1,7 +1,14 @@
 import { prisma } from "@/lib/db";
 import NewClientForm from "./NewClientForm";
+import { unstable_noStore as noStore } from "next/cache";
 
-export default async function ClientsPage() {
+export const runtime = "nodejs";
+export const revalidate = 0; // ou: export const dynamic = "force-dynamic";
+
+
+
+export default async function Page() {
+  noStore();
   const clients = await prisma.client.findMany({ orderBy: { createdAt: "desc" } });
 
   return (
