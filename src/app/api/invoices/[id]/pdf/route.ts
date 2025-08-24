@@ -84,12 +84,12 @@ export async function GET(_req: NextRequest, { params }: RouteCtx) {
   drawTitle(page, bold, `FACTURE ${invoice.number ?? ""}`);
 
   // Blocs société & client
-  const companyY = drawCompanyBlock(page, font, [
-    "Plaut Luke",
-    "2 rue André Huot",
-    "51510 Fagnières",
-    "SIRET: 123 456 789 00010",
-    "TVA: FR12 123456789",
+   const companyY = drawCompanyBlock(page, font, [
+    "XXXXXXXXXXX",
+    "XXXXXXXXXXXXXXXXX",
+    "XXXXXXXXXXXXXXX",
+    "SIRET: XXXXXXXXXXXXXXX",
+    "TVA: FRXXXXXXXXX",
   ]);
 
   drawClientBlock(
