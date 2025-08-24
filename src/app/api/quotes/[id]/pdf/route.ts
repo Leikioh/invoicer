@@ -81,11 +81,11 @@ export async function GET(_req: NextRequest, { params }: RouteCtx) {
   drawTitle(page, bold, `DEVIS ${quote.number ?? ""}`);
 
   const companyY = drawCompanyBlock(page, font, [
-    "Plaut Luke",
-    "2 rue André Huot",
-    "51510 Fagnières",
-    "SIRET: 123 456 789 00010",
-    "TVA: FR12 123456789",
+    "XXXXXXXXXXX",
+    "XXXXXXXXXXXXXXXXX",
+    "XXXXXXXXXXXXXXX",
+    "SIRET: XXXXXXXXXXXXXXX",
+    "TVA: FRXXXXXXXXX",
   ]);
 
   drawClientBlock(
