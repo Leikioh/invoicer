@@ -1,8 +1,8 @@
 // ---------- Datasource & Generator (Postgres Supabase) ----------
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")  // pooler (pgbouncer)
-  directUrl = env("DIRECT_URL")    // connexion directe pour migrations/Studio
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL") // si tu veux
 }
 
 generator client {
